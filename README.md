@@ -1,6 +1,6 @@
 # Bronze → Silver (Stage 2)
 
-A modular batch system that reads **Bronze** tables from Postgres, applies
+A modular batch system that reads **Bronze** tables from a data source, applies
 transformation logic, and writes curated **Silver** tables. This repo handles
 **only** Bronze → Silver. Ingestion (JSON → Bronze) and export (Silver →
 downstream) live elsewhere.
