@@ -1,0 +1,59 @@
+name: bronze-to-silver
+
+# Mirrors "GitHub Actions Workflow 2 (Bronze -> Silver)" from the architecture
+# diagram. Reads the Bronze tables and (re)builds the Silver tables.
+on:
+  workflow_dispatch:
+    inputs:
+      transformation:
+        description: "Which transformation to run: 'all' or a specific name (e.g. silver_firm_transport_rate)"
+        required: true
+        default: "all"
+  schedule:
+    # Runs at :30 past each hour — offset AFTER the :00 Bronze ingestion so
+    # Silver transforms freshly-landed data. Adjust to your cadence.
+    - cron: "30 * * * *"
+
+jobs:
+  transform:
+    runs-on: ubuntu-latest
+
+    # Job-level env so every step inherits it. DATABASE_URL is the same repo
+    # secret you set for the ingestion repo (your Neon connection string).
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BRONZE_SCHEMA: bronze
+      SILVER_SCHEMA: silver
+      LOG_LEVEL: INFO
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Read-only snapshot of Bronze/Silver row counts BEFORE transforming,
+      # so the run log shows exactly what inputs were present.
+      - name: Inspect (before)
+        run: python run.py --inspect
+
+      # Run either everything or a single transformation chosen at dispatch.
+      # On the scheduled trigger the input is empty, so it defaults to 'all'.
+      - name: Run Bronze -> Silver
+        run: |
+          INPUT="${{ github.event.inputs.transformation || 'all' }}"
+          if [ "$INPUT" = "all" ]; then
+            python run.py --all
+          else
+            python run.py --table "$INPUT"
+          fi
+
+      # Snapshot AFTER (runs even if the transform failed) so you can see the
+      # resulting Silver row counts in the same log.
+      - name: Inspect (after)
+        if: always()
+        run: python run.py --inspect
