@@ -1,4 +1,4 @@
-# Bronze → Silver (Pipeline Accelerator)
+# Bronze → Silver (Stage 2)
 
 A modular batch system that reads **Bronze** tables from Postgres, applies
 transformation logic, and writes curated **Silver** tables. This repo handles
