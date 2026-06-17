@@ -6,12 +6,19 @@ The shared pattern every Silver transformation follows.
 To add a new Silver table, create a file in src/transformations/ that subclasses
 SilverTransformation and implements three things:
 
-    name            -> the silver table name (also the registry key / CLI name)
+    name            -> the registry key / CLI name (e.g. "silver_firm_transport_rate")
+    table_name      -> the bare table name created in the Silver schema
+                        (e.g. "firm_transport_rate"); used by the runner to check
+                        whether the table already exists before running at all
     bronze_sources  -> Bronze tables it reads (used for a pre-run existence check)
     create_table_sql()  -> CREATE TABLE IF NOT EXISTS ...   (idempotent DDL)
     transform_sql()     -> INSERT ... SELECT ... ON CONFLICT DO UPDATE  (idempotent load)
 
 ...then decorate the class with @register. That's it — the runner discovers it.
+
+NOTE: the runner skips a transformation entirely (no create, no insert/update) once
+`silver_schema.table_name` already exists — see runner._silver_table_exists(). The
+table is only ever populated on the run that creates it.
 
 The methods return plain SQL strings, so this module deliberately does NOT import
 SQLAlchemy. The runner passes a live Connection to run().
@@ -28,6 +35,7 @@ from ..config import settings
 class SilverTransformation(ABC):
     # --- override these in each subclass -------------------------------------
     name: str = ""                 # e.g. "silver_firm_transport_rate"
+    table_name: str = ""           # e.g. "firm_transport_rate" (lives in silver_schema)
     bronze_sources: List[str] = []  # e.g. ["gtran_firm", "gtran_rates", "gtran_loc"]
 
     # --- schema names come from config so they're not hardcoded --------------
@@ -36,6 +44,8 @@ class SilverTransformation(ABC):
         self.silver_schema = settings.silver_schema
         if not self.name:
             raise ValueError(f"{type(self).__name__} must set a `name`.")
+        if not self.table_name:
+            raise ValueError(f"{type(self).__name__} must set a `table_name`.")
 
     # --- implement these in each subclass ------------------------------------
     @abstractmethod

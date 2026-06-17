@@ -108,17 +108,23 @@ def inspect() -> None:
         for name in sorted(REGISTRY):
             t = REGISTRY[name]
             missing = [s for s in t.bronze_sources if s not in bronze_counts]
-            target = t.name.replace("silver_", "", 1)  # display hint only
-            ready = "READY " if not missing else "BLOCKED"
-            print(f"\n  [{ready}] {name}")
+            target_exists = t.table_name in silver_names
+            if missing:
+                status = "BLOCKED"
+            elif target_exists:
+                status = "SKIP   "  # table already exists -> runner will skip it
+            else:
+                status = "READY  "
+            print(f"\n  [{status}] {name}")
             for src in t.bronze_sources:
                 if src in bronze_counts:
                     print(f"      reads {bronze_schema}.{src:<16} {bronze_counts[src]:>8} rows")
                 else:
                     print(f"      reads {bronze_schema}.{src:<16}   MISSING")
-            # does a matching silver table already exist?
-            existing = [s for s in silver_names if target in s or s in name]
-            note = f"target silver table exists ({existing[0]})" if existing else "target silver table not created yet"
+            if target_exists:
+                note = f"target silver table exists ({silver_schema}.{t.table_name}) -> run will be skipped"
+            else:
+                note = f"target silver table not created yet ({silver_schema}.{t.table_name})"
             print(f"      -> {note}")
     print()
 

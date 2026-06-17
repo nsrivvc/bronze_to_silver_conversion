@@ -8,13 +8,20 @@ Reads:  gtran_firm (header) + gtran_rates (rate/path) + gtran_loc (point qty).
 
 ==========================  HOW TO ADD A NEW SILVER TABLE  ==========================
 Copy this file, then change:
-  1. class name + `name`           -> your silver table name
-  2. `bronze_sources`              -> the Bronze tables you read
-  3. create_table_sql()            -> your CREATE TABLE columns/types
-  4. transform_sql()               -> your column mapping + business rules
+  1. class name + `name`           -> your registry key / CLI name
+  2. `table_name`                  -> the bare table name created in the Silver schema
+  3. `bronze_sources`              -> the Bronze tables you read
+  4. create_table_sql()            -> your CREATE TABLE columns/types (must create
+                                       `table_name` exactly, since the runner checks
+                                       for it before deciding whether to run at all)
+  5. transform_sql()               -> your column mapping + business rules
 Keep the two idempotency pieces:
   * CREATE TABLE IF NOT EXISTS  and a UNIQUE natural key
   * INSERT ... SELECT ... ON CONFLICT (natural key) DO UPDATE
+
+NOTE: the runner (src/core/runner.py) skips this transformation entirely once
+`silver_schema.table_name` already exists — the table is only ever populated on
+the run that creates it. Later runs will NOT pick up new/changed Bronze rows.
 ====================================================================================
 """
 
@@ -27,6 +34,7 @@ from ..core.registry import register
 @register
 class SilverFirmTransportRate(SilverTransformation):
     name = "silver_firm_transport_rate"
+    table_name = "firm_transport_rate"
     bronze_sources = ["gtran_firm", "gtran_rates", "gtran_loc"]
 
     # ------------------------------------------------------------------ DDL

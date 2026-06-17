@@ -7,6 +7,10 @@ transaction, with dependency checks, timing, logging, and error isolation.
 A failure in one transformation is logged and does not stop the others; the
 runner reports an overall non-zero result if anything failed (run.py turns that
 into a non-zero exit code, which schedulers use to flag failed jobs).
+
+A transformation is skipped entirely — no CREATE TABLE, no INSERT/UPDATE — once
+its Silver table already exists. The table is only ever populated on the run
+that creates it; rerunning after that is a deliberate no-op.
 """
 
 from __future__ import annotations
@@ -49,6 +53,11 @@ def _check_dependencies(conn, t: SilverTransformation) -> List[str]:
     return missing
 
 
+def _silver_table_exists(conn, t: SilverTransformation) -> bool:
+    """True if this transformation's Silver table has already been created."""
+    return table_exists(conn, t.silver_schema, t.table_name)
+
+
 def run_one(name: str) -> Result:
     """Run a single transformation by name, in its own transaction."""
     if name not in REGISTRY:
@@ -64,6 +73,11 @@ def run_one(name: str) -> Result:
             if missing:
                 msg = f"missing Bronze sources: {', '.join(missing)}"
                 log.warning("[%s] skipped — %s", name, msg)
+                return Result(name, "skipped", 0, time.perf_counter() - start, msg)
+
+            if _silver_table_exists(conn, t):
+                msg = f"silver table already exists: {t.silver_schema}.{t.table_name}"
+                log.info("[%s] skipped — %s", name, msg)
                 return Result(name, "skipped", 0, time.perf_counter() - start, msg)
 
             rows = t.run(conn)
