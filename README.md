@@ -26,13 +26,20 @@ src/
 ```
 
 - **One file per Silver table.** Each subclasses `SilverTransformation` and
-  provides `create_table_sql()` and `transform_sql()`.
+  provides `table_name`, `create_table_sql()`, and `transform_sql()`.
 - **Per-table transactions.** The runner runs each transformation in its own
   `engine.begin()` block, so a failure rolls back cleanly and doesn't stop the
   others. It also checks the required Bronze tables exist first (skips with a
   clear message if not).
-- **Idempotent.** `CREATE TABLE IF NOT EXISTS` + a `UNIQUE` natural key +
-  `ON CONFLICT DO UPDATE`. Re-running refreshes rows in place — no duplicates.
+- **Load-once, then skip.** Before doing anything, the runner checks whether
+  `silver_schema.table_name` already exists. If it does, the transformation is
+  skipped entirely — no `CREATE TABLE`, no `INSERT`/`UPDATE`. A table is only
+  ever populated on the run that creates it; reruns after that are a deliberate
+  no-op, even if the underlying Bronze rows have changed. The SQL itself is
+  still written idempotently (`CREATE TABLE IF NOT EXISTS` + a `UNIQUE` natural
+  key + `ON CONFLICT DO UPDATE`) so a single first run can't produce duplicates,
+  but that's the only protection — see [Reloading a table](#reloading-a-table)
+  to force a refresh.
 - **Driver-isolated.** Only `db/connection.py` imports the driver, so
   `--list` / `--show-sql` work with no database, and swapping databases later is
   contained to one file.
@@ -66,10 +73,11 @@ python run.py --all                                  # run all of them
 ```
 
 Run `--inspect` before transforming to confirm which Bronze tables exist and how
-many rows they hold, and which transformations are READY vs BLOCKED (missing a
-source). It's read-only — it never writes or alters data — so it's safe to run
-anytime to check the state as data flows through. Run it again afterward to see
-the new Silver row counts.
+many rows they hold, and whether each transformation is READY (will run),
+BLOCKED (missing a Bronze source), or SKIP (its Silver table already exists, so
+the run would be a no-op). It's read-only — it never writes or alters data — so
+it's safe to run anytime to check the state as data flows through. Run it again
+afterward to see the new Silver row counts.
 
 The run commands exit non-zero if any transformation fails, so a scheduler can
 flag the job.
@@ -78,18 +86,41 @@ flag the job.
 
 1. Copy `src/transformations/silver_firm_transport_rate.py` to a new file, e.g.
    `silver_pipeline_locations.py`.
-2. Change four things (each is commented in the example):
-   - the class name and `name`
+2. Change five things (each is commented in the example):
+   - the class name and `name` (registry key / CLI name)
+   - `table_name` (the bare table name created in the Silver schema — the
+     runner checks for exactly this table to decide whether to skip the run)
    - `bronze_sources` (the Bronze tables you read)
-   - `create_table_sql()` (your columns/types)
+   - `create_table_sql()` (your columns/types — must create `table_name`)
    - `transform_sql()` (your column mapping + business rules)
 3. Keep the idempotency pieces: `CREATE TABLE IF NOT EXISTS` with a `UNIQUE`
-   natural key, and `INSERT … SELECT … ON CONFLICT (key) DO UPDATE`.
+   natural key, and `INSERT … SELECT … ON CONFLICT (key) DO UPDATE`. They
+   protect a single first run from producing duplicates; they do not cause
+   later reruns to refresh anything, since the runner skips once the table
+   exists.
 
 That's it — `python run.py --list` will show it immediately.
 
 > Most transformations are pure SQL. If one needs real Python logic, override
 > `run(self, conn)` in your subclass instead of using the two SQL methods.
+
+## Reloading a table
+
+Because a transformation is skipped once its Silver table exists, picking up
+new or corrected Bronze rows means dropping the table first:
+
+```sql
+DROP TABLE silver.firm_transport_rate;
+```
+
+Then rerun it:
+
+```bash
+python run.py --table silver_firm_transport_rate
+```
+
+`--inspect` will show `SKIP` for any transformation whose table is already
+present — that's the signal a drop is needed before it will load again.
 
 ## Running it on a schedule later
 
@@ -119,4 +150,3 @@ For other schedulers:
 
 Because nothing is hardcoded and logs go to stdout, the same command works
 locally, in CI, and in a cloud job.
-```
