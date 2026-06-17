@@ -42,6 +42,16 @@ def _quote(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
+def schema_exists(conn, schema: str) -> bool:
+    from sqlalchemy import text
+
+    row = conn.execute(
+        text("SELECT 1 FROM information_schema.schemata WHERE schema_name = :s"),
+        {"s": schema},
+    ).first()
+    return row is not None
+
+
 def list_schema_tables(conn, schema: str) -> List[str]:
     from sqlalchemy import text
 
@@ -77,12 +87,18 @@ def inspect() -> None:
     silver_schema = settings.silver_schema
 
     with engine.connect() as conn:  # read-only; no transaction/commit needed
-        bronze = snapshot_schema(conn, bronze_schema)
+        bronze_exists = schema_exists(conn, bronze_schema)
+        bronze = snapshot_schema(conn, bronze_schema) if bronze_exists else []
         silver = snapshot_schema(conn, silver_schema)
         bronze_counts: Dict[str, int] = {t.name: t.row_count for t in bronze}
         silver_names = {t.name for t in silver}
 
-        _print_table_block(f"BRONZE schema '{bronze_schema}'", bronze)
+        if bronze_exists:
+            _print_table_block(f"BRONZE schema '{bronze_schema}'", bronze)
+        else:
+            print(f"\nBRONZE schema '{bronze_schema}'")
+            print("-" * 72)
+            print("  No bronze schema detected in database (neon).")
         _print_table_block(f"SILVER schema '{silver_schema}'", silver)
 
         print("\nTransformation readiness")
